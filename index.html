@@ -87,6 +87,25 @@
     display:flex; align-items:center; justify-content:center; flex-shrink:0;}
   .modeicon svg{width:26px; height:26px;}
   .modeicon.kor{background:#f6ece1; color:var(--kor);}
+  .modeicon.quiz{background:#e6f0ea; color:#1f8a5b;}
+  .badge.q{background:#e0f0e8; color:#1f8a5b;}
+  .quiz{padding:20px 18px 40px;}
+  .qcard{background:#fff; border:1px solid var(--line); border-radius:20px; padding:24px 20px; box-shadow:0 2px 12px rgba(31,56,100,.07);}
+  .qprog{font-size:12.5px; color:var(--sub); font-weight:700; margin-bottom:8px; text-align:center;}
+  .qbar{height:6px; background:var(--light); border-radius:4px; overflow:hidden; margin-bottom:20px;}
+  .qbar > i{display:block; height:100%; background:#1f8a5b; transition:width .3s;}
+  .exprompt{font-size:20px; font-weight:700; line-height:1.5; color:var(--ink); text-align:center; margin-bottom:8px; word-break:keep-all;}
+  .exprompt.small{font-size:17px; font-weight:600;}
+  .exhint{text-align:center; font-size:13px; color:var(--sub); margin-bottom:16px;}
+  .exhint b{color:var(--navy);}
+  .stlisten{display:block; margin:0 auto 14px; background:none; border:none; color:var(--navy2); font-size:13px; font-weight:700; cursor:pointer;}
+  .exopts{display:flex; flex-direction:column; gap:10px; margin-top:8px;}
+  .exopt{border:1.5px solid var(--line); background:#fff; border-radius:13px; padding:15px; font-size:15.5px; font-weight:700; color:var(--ink); cursor:pointer; text-align:center; transition:.12s; word-break:keep-all; line-height:1.4;}
+  .exopt:active{transform:scale(.98);}
+  .exopt.correct{background:#e7f6ee; border-color:var(--good); color:var(--good);}
+  .exopt.wrong{background:#fdecec; border-color:var(--bad); color:var(--bad);}
+  .qnext{margin-top:16px; width:100%; padding:15px; border:none; border-radius:13px; background:var(--navy); color:#fff; font-size:15px; font-weight:800; cursor:pointer;}
+  .qnext:disabled{opacity:.4;}
   .modecard h3{margin:0 0 3px; font-size:16px;}
   .modecard p{margin:0; font-size:12.5px; color:var(--sub); line-height:1.45;}
   .badge{display:inline-block; font-size:10.5px; font-weight:800; padding:2px 7px; border-radius:6px; margin-left:6px; vertical-align:middle;}
@@ -236,21 +255,60 @@ loadStore();
 
 /* ---- 음성 재생 (영어/한국어) ---- */
 let voices=[];
-function loadVoices(){voices=window.speechSynthesis?speechSynthesis.getVoices():[];}
-if(window.speechSynthesis){loadVoices(); speechSynthesis.onvoiceschanged=loadVoices;}
+let voicesReady=false;
+function loadVoices(){
+  if(!window.speechSynthesis) return;
+  const v=speechSynthesis.getVoices();
+  if(v && v.length){ voices=v; voicesReady=true; }
+}
+if(window.speechSynthesis){
+  loadVoices();
+  speechSynthesis.onvoiceschanged=loadVoices;
+  // 일부 브라우저는 onvoiceschanged가 늦거나 안 오므로, 잠깐씩 재시도
+  let tries=0;
+  const iv=setInterval(()=>{ loadVoices(); if(voicesReady||++tries>20) clearInterval(iv); }, 250);
+  // iOS 사파리 등: 첫 사용자 터치에 음성엔진을 한 번 깨워야 이후 발음이 안정적으로 나옴
+  let ttsWarmed=false;
+  function warmTTS(){
+    if(ttsWarmed) return; ttsWarmed=true;
+    try{
+      loadVoices();
+      const u=new SpeechSynthesisUtterance(" ");
+      u.volume=0; // 무음으로 깨우기만
+      speechSynthesis.speak(u);
+    }catch(_){}
+    document.removeEventListener("touchend", warmTTS);
+    document.removeEventListener("click", warmTTS);
+  }
+  document.addEventListener("touchend", warmTTS, {once:false});
+  document.addEventListener("click", warmTTS, {once:false});
+}
 function pickVoice(lang){
   if(lang==="ko") return voices.find(v=>/^ko/i.test(v.lang))||null;
   return voices.find(v=>/en[-_]US/i.test(v.lang))||voices.find(v=>/^en/i.test(v.lang))||null;
 }
-function speak(text,btn,lang){
-  if(!window.speechSynthesis)return;
-  lang=lang||"en";
-  speechSynthesis.cancel();
+function doSpeak(text,btn,lang){
   const u=new SpeechSynthesisUtterance(text);
-  const v=pickVoice(lang); if(v)u.voice=v; u.lang=v?v.lang:(lang==="ko"?"ko-KR":"en-US"); u.rate=0.9;
+  const v=pickVoice(lang); if(v)u.voice=v;
+  u.lang = v ? v.lang : (lang==="ko"?"ko-KR":"en-US");
+  u.rate=0.9;
   if(btn){document.querySelectorAll(".playing").forEach(e=>e.classList.remove("playing"));
     btn.classList.add("playing"); u.onend=u.onerror=()=>btn.classList.remove("playing");}
-  speechSynthesis.speak(u);
+  try{ speechSynthesis.speak(u); }catch(_){}
+}
+function speak(text,btn,lang){
+  if(!window.speechSynthesis){ return; }
+  lang=lang||"en";
+  try{ speechSynthesis.cancel(); }catch(_){}
+  // 음성 목록이 아직 로드 안 됐으면 한 번 더 불러오고, 그래도 없으면 잠깐 뒤 재생
+  if(!voicesReady){
+    loadVoices();
+    if(!voicesReady){
+      setTimeout(()=>doSpeak(text,btn,lang), 250);
+      return;
+    }
+  }
+  doSpeak(text,btn,lang);
 }
 
 /* ---- 음성 인식 ---- */
@@ -290,6 +348,13 @@ function matchEn(target,heardList,typed){
 
 /* 한글 채점 */
 function normKo(s){return (s||"").replace(/\([^)]*\)/g,"").replace(/~/g,"").replace(/[.\/·]/g," ").replace(/\s+/g,"").trim();}
+
+/* 같은 영어 단어가 세트마다 뜻이 다르게 적힌 경우, 모든 뜻을 정답으로 인정 */
+const MEAN_DICT = {"rarely": ["거의 ~하지 않는", "거의 ~않는"], "benefit": ["이점, 이익", "이점", "이익을 얻다"], "wave": ["파도, 파동", "파도"], "movement": ["움직임", "(사회적) 운동"], "control": ["조절하다", "조종하다"], "loud": ["(소리가) 큰, 시끄러운", "크게; (소리가) 큰"], "face": ["직면하다", "(방향을) 향하다"], "increase": ["높이다, 증가시키다", "증가하다"], "experience": ["경험", "경험하다"], "support": ["지원하다", "지원; 지원하다", "지지, 성원"], "freeze": ["얼다, 얼리다", "얼다"], "produce": ["생산하다, 만들어 내다", "제작하다", "생성하다", "만들어 내다"], "annoying": ["성가신, 짜증 나는", "성가신"], "source": ["원천, 근원", "원천, 공급원"], "heat": ["데우다, 가열하다", "열"], "healthy": ["건강한", "건강한, 건강에 좋은"], "huge": ["거대한, 아주 큰", "거대한", "엄청난"], "at least": ["적어도, 최소한", "적어도"], "physical": ["신체의, 육체의", "신체적인"], "promote": ["승진시키다", "촉진하다"], "bring": ["데려오다, 가져오다", "가져오다, 가져가다"], "introduce": ["소개하다", "도입하다"], "chance": ["기회", "가능성, 기회"], "creature": ["동물, 생물", "생물"], "empty": ["빈", "비우다"], "normal": ["일반적인, 보통의", "정상적인", "일반적인"], "nearby": ["근처에서", "근처의"], "allow": ["허용하다, ~하게 하다", "~하게 하다"], "test": ["시험하다; 시험", "시험하다"], "hide": ["숨다, 숨기다", "숨기다 (hid-hidden)"], "survive": ["살아남다", "생존하다", "생존하다, 살아남다"], "prevent": ["막다", "방해하다, 막다"], "saying": ["속담, 격언", "속담"], "communicate": ["의사소통을 하다", "의사소통하다"], "researcher": ["연구자", "연구원"], "hope": ["희망", "바라다"], "certain": ["특정한; 확실한", "확신하는"], "embarrassed": ["당황한", "당황한, 부끄러운"], "match": ["시합, 경기", "연결하다, 일치시키다"], "give up": ["~을 포기하다", "포기하다"], "celebrate": ["축하하다", "축하하다, 기념하다"], "natural": ["자연의", "타고난; 자연스러운"], "recognize": ["알아차리다, 인식하다", "알아보다"], "consume": ["소비하다", "소비하다, 마시다"]};
+function allMeansFor(word){
+  const k=(word||"").toLowerCase().trim();
+  return (MEAN_DICT[k] || []);
+}
 
 // 의미가 통하는 유사어 그룹 (한 그룹 안의 단어끼리는 서로 정답으로 인정)
 const SYNONYMS = [
@@ -446,17 +511,24 @@ function synMatch(a,b){
 }
 
 function answerKeys(mean){
-  const parts=mean.split(/[,、]/).map(p=>normKo(p)).filter(Boolean);
+  const parts=mean.split(/[,、;；\/]/).map(p=>normKo(p)).filter(Boolean);
   const keys=new Set();
   parts.forEach(p=>{keys.add(p);
     const stem=p.replace(/(하다|되다|시키다|하는|되는|한|된|히|이다|다)$/,"");
     if(stem.length>=1)keys.add(stem);});
   return [...keys];
 }
-function matchKo(mean,heardList){
-  const keys=answerKeys(mean);
+function matchKo(mean,heardList,word){
+  // 이 단어가 여러 세트에서 가진 모든 뜻을 정답 키로 통합 (movement=움직임/운동 모두 인정)
+  let keys=answerKeys(mean);
+  const extra=allMeansFor(word);
+  if(extra.length){
+    const set=new Set(keys);
+    extra.forEach(m=>answerKeys(m).forEach(k=>set.add(k)));
+    keys=[...set];
+  }
   // 종결 조사만 제거 (부사/형용사 파생 어미 '~하게/~적으로/~답게' 등은 남겨 품사 구분 유지)
-  const stripJosa=(x)=>x.replace(/(습니다|ㅂ니다|입니다|이에요|예요|이요|이야|야|이다|임|요)$/,"");
+  const stripJosa=(x)=>x.replace(/(습니다|ㅂ니다|입니다|이에요|예요|이요|이야|야|이다|요)$/,"");
   for(const raw of heardList){
     let h=normKo(raw); if(!h) continue;
     h=stripJosa(h);
@@ -468,20 +540,128 @@ function matchKo(mean,heardList){
   return {ok:false,heard:heardList[0]||""};
 }
 
+/* ---- 예문 4지선다 퀴즈 ---- */
+let exquiz=null;
+function blankExample(word, ex){
+  if(!ex) return null;
+  const w=(word||"").trim();
+  if(w.includes(" ")||w.includes("~")){
+    const core=w.replace(/~/g,"").trim();
+    const re=new RegExp(core.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");
+    if(re.test(ex)) return ex.replace(re,"______");
+    return null;
+  }
+  let stem=w;
+  if(/(e|y)$/.test(w)) stem=w.slice(0,-1);
+  const re=new RegExp("\\b"+stem.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"[a-z]{0,4}\\b","i");
+  const m=ex.match(re);
+  if(m) return ex.replace(m[0],"______");
+  return null;
+}
+function startExQuiz(kind){
+  const s=SETS[state.setIdx];
+  let pool=s.words.map(w=>({w, blank: blankExample(w.w, w.ex)}));
+  if(kind==="exword") pool=pool.filter(x=>x.blank);
+  else pool=pool.filter(x=>x.w.ex && x.w.exKo);
+  pool=shuffle(pool);
+  const qs=pool.map(x=>{
+    let prompt, answer, options;
+    if(kind==="exword"){
+      prompt=x.blank; answer=x.w.w;
+      const wrongs=shuffle(s.words.filter(o=>o.w!==x.w.w)).slice(0,3).map(o=>o.w);
+      options=shuffle([answer,...wrongs]);
+    }else{
+      prompt=x.w.ex; answer=x.w.exKo;
+      const wrongs=shuffle(s.words.filter(o=>o.exKo && o.exKo!==x.w.exKo)).slice(0,3).map(o=>o.exKo);
+      options=shuffle([answer,...wrongs]);
+    }
+    return {word:x.w, prompt, answer, options};
+  });
+  exquiz={kind, qs, i:0, picked:null, score:0, results:[], done:false, saved:false};
+}
+function exQuizHTML(){
+  const s=SETS[state.setIdx];
+  const kind=exquiz.kind;
+  const modeName= kind==="exword" ? "예문 빈칸 시험" : "예문 해석 시험";
+  if(!exquiz.qs.length){
+    return `<header><button class="backbtn" data-modes>‹ 뒤로</button><h1>${esc(s.pages)} ${modeName}</h1></header>
+      <div class="quiz"><div class="qcard"><p style="color:var(--sub)">이 세트에는 예문 문제를 만들 수 있는 항목이 부족해요.</p>
+      <button class="stbtn solid" data-modes style="margin-top:16px;">돌아가기</button></div></div>`;
+  }
+  if(exquiz.done){
+    const total=exquiz.qs.length, score=exquiz.score, pct=Math.round(score/total*100);
+    if(!exquiz.saved){ setBest(s.key, kind, pct);
+      addHistory({date:todayStr(),pages:s.pages,topic:s.topic,mode:kind,
+        modeName:modeName,score,total,pct,retry:false}); exquiz.saved=true; }
+    const rev=exquiz.results.map(r=>`
+      <div class="rvrow ${r.ok?'ok':'no'}"><div class="rok">${r.ok?'✓':'✕'}</div>
+        <div class="rw"><b>${esc(r.word.w)}</b><span>${esc(r.word.mean)}</span></div>
+        <button class="rspk" data-speak="${esc(r.word.w)}" data-lang="en">${ICON_SPK_SM}</button></div>`).join("");
+    return `
+      <header><button class="backbtn" data-modes>‹ 뒤로</button><h1>${esc(s.pages)} 결과</h1>
+        <div class="sub">${modeName} · 객관식</div></header>
+      <div class="quiz"><div class="stresult">
+        <div class="score">${score} / ${total}</div>
+        <div class="lbl">${score===total?'완벽해요! 🎉':score>=total*0.7?'아주 잘했어요! 👏':'조금만 더 연습해봐요 💪'}</div>
+        <button class="stbtn send" data-share style="margin-top:20px;width:100%;">📤 부모님께 결과 보내기</button>
+        <button class="stbtn ghost" data-exretry style="margin-top:10px;width:100%;">다시 도전</button>
+        <div class="review"><h4>단어별 결과</h4>${rev}</div>
+      </div></div>`;
+  }
+  const q=exquiz.qs[exquiz.i];
+  const pct=Math.round(exquiz.i/exquiz.qs.length*100);
+  const opts=q.options.map(o=>{
+    let cls="exopt";
+    if(exquiz.picked!==null){
+      if(o===q.answer) cls+=" correct";
+      else if(o===exquiz.picked) cls+=" wrong";
+    }
+    return `<button class="${cls}" data-exopt="${esc(o)}" ${exquiz.picked!==null?'disabled':''}>${esc(o)}</button>`;
+  }).join("");
+  const hint = kind==="exword" ? `<div class="exhint">뜻 힌트: <b>${esc(q.word.mean)}</b></div>` : "";
+  return `
+    <header><button class="backbtn" data-modes>‹ 뒤로</button>
+      <h1>${esc(s.pages)} · ${modeName}</h1>
+      <div class="sub">${kind==="exword"?"빈칸에 알맞은 단어를 고르세요":"알맞은 해석을 고르세요"}</div></header>
+    <div class="quiz">
+      <div class="qcard">
+        <div class="qprog">${exquiz.i+1} / ${exquiz.qs.length}</div>
+        <div class="qbar"><i style="width:${pct}%"></i></div>
+        <div class="exprompt ${kind==="exword"?"":"small"}">${esc(q.prompt)}</div>
+        ${hint}
+        <div class="exopts">${opts}</div>
+        <button class="qnext" data-exnext ${exquiz.picked===null?'disabled':''}>${exquiz.i+1===exquiz.qs.length?'결과 보기':'다음 →'}</button>
+      </div>
+    </div>`;
+}
+
 const ICON_SPK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>';
 const ICON_SPK_SM='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>';
 const ICON_MIC='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+const ICON_QUIZ='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
 function esc(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 
 /* ---- 결과 공유 (부모님께) ---- */
 function buildShareText(){
-  if(!test) return "";
   const s=SETS[state.setIdx];
-  const total=test.qs.length, score=test.results.filter(r=>r&&r.ok).length;
-  const pct=Math.round(score/total*100);
   const name=(store.name||"").trim();
   const who = name ? `${name} ` : "";
+  // 예문 퀴즈 결과
+  if(state.view==="exquiz" && exquiz){
+    const total=exquiz.qs.length, score=exquiz.score, pct=Math.round(score/total*100);
+    const emoji = pct===100?"🎉":pct>=70?"👏":"💪";
+    const wrong=exquiz.results.filter(r=>r&&!r.ok).map(r=>r.word.w);
+    let msg=`[영어 단어 시험 결과] ${emoji}\n${who}학생\n`;
+    msg+=`· 범위: ${s.pages} ${s.topic}\n`;
+    msg+=`· 유형: ${exquiz.kind==="exword"?"예문 빈칸(객관식)":"예문 해석(객관식)"}\n`;
+    msg+=`· 점수: ${score} / ${total} (${pct}점)\n· 날짜: ${todayStr()}`;
+    if(wrong.length) msg+=`\n· 틀린 단어: ${wrong.slice(0,10).join(", ")}${wrong.length>10?" 외":""}`;
+    return msg;
+  }
+  if(!test) return "";
+  const total=test.qs.length, score=test.results.filter(r=>r&&r.ok).length;
+  const pct=Math.round(score/total*100);
   const emoji = pct===100?"🎉":pct>=70?"👏":"💪";
   const wrong=test.results.filter(r=>r&&!r.ok).map(r=>r.w.w);
   let msg=`[영어 단어 시험 결과] ${emoji}\n`;
@@ -540,6 +720,7 @@ function render(){
   else if(state.view==="modes")app.innerHTML=modesHTML();
   else if(state.view==="study")app.innerHTML=studyHTML();
   else if(state.view==="test")app.innerHTML=testHTML();
+  else if(state.view==="exquiz")app.innerHTML=exQuizHTML();
   else if(state.view==="history")app.innerHTML=historyHTML();
   bind();
 }
@@ -598,6 +779,7 @@ function homeHTML(){
 function modesHTML(){
   const s=SETS[state.setIdx];
   const bKo=bestScore(s.key,"ko"), bEn=bestScore(s.key,"en");
+  const bExW=bestScore(s.key,"exword"), bExM=bestScore(s.key,"exmean");
   const favN=s.words.filter(w=>isFav(s.key,w.w)).length;
   return `
     <header><button class="backbtn" data-home>‹ 세트 목록</button>
@@ -614,6 +796,14 @@ function modesHTML(){
       <div class="modecard" data-test="en">
         <div class="modeicon">${ICON_MIC}</div>
         <div><h3>단어 말하기 시험<span class="badge e">한글→영어</span>${bEn!==null?`<span class="mbest">최고 ${bEn}점</span>`:''}</h3><p>한글 뜻을 보고 <b>영어 단어</b>를 말하거나 입력하면 채점해요.</p></div>
+      </div>
+      <div class="modecard" data-exquiz="exword">
+        <div class="modeicon quiz">${ICON_QUIZ}</div>
+        <div><h3>예문 빈칸 시험<span class="badge q">객관식</span>${bExW!==null?`<span class="mbest">최고 ${bExW}점</span>`:''}</h3><p>예문의 빈칸에 알맞은 <b>영어 단어</b>를 4개 중에서 고르세요.</p></div>
+      </div>
+      <div class="modecard" data-exquiz="exmean">
+        <div class="modeicon quiz">${ICON_QUIZ}</div>
+        <div><h3>예문 해석 시험<span class="badge q">객관식</span>${bExM!==null?`<span class="mbest">최고 ${bExM}점</span>`:''}</h3><p>영어 예문을 보고 알맞은 <b>우리말 해석</b>을 4개 중에서 고르세요.</p></div>
       </div>
     </div>`;
 }
@@ -783,7 +973,7 @@ function submitTyping(){
   if(!val){ el.focus(); return; }
   const q=test.qs[test.i];
   const isKo=test.mode==="ko";
-  const m = isKo ? matchKo(q.mean, [val]) : matchEn(q.w, [val], true);
+  const m = isKo ? matchKo(q.mean, [val], q.w) : matchEn(q.w, [val], true);
   test.heard=val; test.ok=m.ok; test.phase="result";
   render();
   if(m.ok) speak(q.w, null, "en");
@@ -808,7 +998,7 @@ function recordOnce(){
     got=true;
     const alts=[];
     for(let i=0;i<e.results[0].length;i++)alts.push(e.results[0][i].transcript);
-    const m = isKo ? matchKo(q.mean, alts) : matchEn(q.w, alts);
+    const m = isKo ? matchKo(q.mean, alts, q.w) : matchEn(q.w, alts);
     test.heard=alts[0]; test.ok=m.ok; test.phase="result";
     recording=false; render();
     if(m.ok) speak(q.w, null, "en"); // 정답이면 영어 발음 들려주기
@@ -831,9 +1021,23 @@ function recordOnce(){
 function bind(){
   const app=document.getElementById("app");
   app.onclick=(e)=>{
-    const t=e.target.closest("[data-set],[data-home],[data-modes],[data-go],[data-test],[data-w],[data-speak],[data-mic],[data-submit],[data-next],[data-skip],[data-skip2],[data-retry],[data-retrywrong],[data-fav],[data-studyall],[data-studyfav],[data-share],[data-history],[data-setname]");
+    const t=e.target.closest("[data-set],[data-home],[data-modes],[data-go],[data-test],[data-exquiz],[data-exopt],[data-exnext],[data-exretry],[data-w],[data-speak],[data-mic],[data-submit],[data-next],[data-skip],[data-skip2],[data-retry],[data-retrywrong],[data-fav],[data-studyall],[data-studyfav],[data-share],[data-history],[data-setname]");
     if(!t)return;
     if(t.hasAttribute("data-speak")){ e.stopPropagation(); speak(t.getAttribute("data-speak"), t, t.getAttribute("data-lang")||"en"); return; }
+    if(t.hasAttribute("data-exquiz")){ startExQuiz(t.getAttribute("data-exquiz")); state.view="exquiz"; scrollTo(0,0); render(); return; }
+    if(t.hasAttribute("data-exopt")){
+      if(exquiz.picked!==null) return;
+      const pick=t.getAttribute("data-exopt"); const q=exquiz.qs[exquiz.i];
+      exquiz.picked=pick; const ok=(pick===q.answer); if(ok)exquiz.score++;
+      exquiz.results[exquiz.i]={word:q.word, ok};
+      render(); if(ok) speak(q.word.w,null,"en"); return;
+    }
+    if(t.hasAttribute("data-exnext")){
+      if(exquiz.i+1>=exquiz.qs.length){ exquiz.done=true; }
+      else { exquiz.i++; exquiz.picked=null; }
+      scrollTo(0,0); render(); return;
+    }
+    if(t.hasAttribute("data-exretry")){ startExQuiz(exquiz.kind); scrollTo(0,0); render(); return; }
     if(t.hasAttribute("data-fav")){ e.stopPropagation(); toggleFav(SETS[state.setIdx].key, t.getAttribute("data-fav")); render(); return; }
     if(t.hasAttribute("data-studyall")){ state.studyFav=false; render(); return; }
     if(t.hasAttribute("data-studyfav")){ state.studyFav=true; render(); return; }
