@@ -265,13 +265,28 @@ function lev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;
   for(let j=1;j<=n;j++)d[0][j]=j;
   for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
   return d[m][n];}
-function matchEn(target,heardList){const tgt=normEn(target);
-  for(const h of heardList){const hh=normEn(h);if(!hh)continue;
-    if(hh===tgt)return{ok:true,heard:h};
-    if(hh.split(" ").includes(tgt))return{ok:true,heard:h};
-    const dist=lev(tgt,hh.replace(/ /g,""));const tol=Math.max(1,Math.floor(tgt.length*0.25));
-    if(dist<=tol)return{ok:true,heard:h};}
-  return{ok:false,heard:heardList[0]||""};}
+// 영국식/미국식 철자 차이는 정답으로 인정 (예: recognise=recognize)
+function ukUs(a,b){
+  const f=(x)=>x.replace(/ise$/,"ize").replace(/isation$/,"ization")
+    .replace(/our$/,"or").replace(/re$/,"er").replace(/ll/g,"l").replace(/ae|oe/g,"e");
+  return f(a)===f(b);
+}
+// typed=true 이면 철자를 정확히 요구(오타 불인정), 음성이면 근접 발음 허용
+function matchEn(target,heardList,typed){
+  const tgt=normEn(target);
+  for(const h of heardList){
+    const hh=normEn(h); if(!hh) continue;
+    if(hh===tgt) return {ok:true,heard:h};                 // 정확 일치
+    if(ukUs(hh,tgt)) return {ok:true,heard:h};             // 영/미 철자 차이만 허용
+    if(typed) continue;                                    // 타이핑은 여기까지(오타 불인정)
+    // ↓ 음성 인식일 때만: 여러 단어로 들리거나 발음이 근접하면 허용
+    if(hh.split(" ").includes(tgt)) return {ok:true,heard:h};
+    const dist=lev(tgt,hh.replace(/ /g,""));
+    const tol = tgt.length>=8 ? 1 : (tgt.length>=5 ? 1 : 0); // 훨씬 엄격하게
+    if(tol>0 && dist<=tol) return {ok:true,heard:h};
+  }
+  return {ok:false,heard:heardList[0]||""};
+}
 
 /* 한글 채점 */
 function normKo(s){return (s||"").replace(/\([^)]*\)/g,"").replace(/~/g,"").replace(/[.\/·]/g," ").replace(/\s+/g,"").trim();}
@@ -768,7 +783,7 @@ function submitTyping(){
   if(!val){ el.focus(); return; }
   const q=test.qs[test.i];
   const isKo=test.mode==="ko";
-  const m = isKo ? matchKo(q.mean, [val]) : matchEn(q.w, [val]);
+  const m = isKo ? matchKo(q.mean, [val]) : matchEn(q.w, [val], true);
   test.heard=val; test.ok=m.ok; test.phase="result";
   render();
   if(m.ok) speak(q.w, null, "en");
