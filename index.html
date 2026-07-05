@@ -98,6 +98,9 @@
   .exprompt.small{font-size:17px; font-weight:600;}
   .exhint{text-align:center; font-size:13px; color:var(--sub); margin-bottom:16px;}
   .exhint b{color:var(--navy);}
+  .hintbtn{display:block; margin:0 auto 16px; background:#fff7e6; border:1px solid #ffe0a3; color:#9a6a00;
+    font-size:13.5px; font-weight:700; padding:9px 18px; border-radius:20px; cursor:pointer;}
+  .hintbtn:active{background:#ffefcc;}
   .stlisten{display:block; margin:0 auto 14px; background:none; border:none; color:var(--navy2); font-size:13px; font-weight:700; cursor:pointer;}
   .exopts{display:flex; flex-direction:column; gap:10px; margin-top:8px;}
   .exopt{border:1.5px solid var(--line); background:#fff; border-radius:13px; padding:15px; font-size:15.5px; font-weight:700; color:var(--ink); cursor:pointer; text-align:center; transition:.12s; word-break:keep-all; line-height:1.4;}
@@ -349,6 +352,43 @@ function matchEn(target,heardList,typed){
 /* 한글 채점 */
 function normKo(s){return (s||"").replace(/\([^)]*\)/g,"").replace(/~/g,"").replace(/[.\/·]/g," ").replace(/\s+/g,"").trim();}
 
+/* 한글 자모 분해 기반 근접 판정 (음성 오인식 흡수: 움직임↔움직이 등) */
+function decomposeKo(s){
+  const CHO=['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+  const JUNG=['ㅏ','ㅐ','ㅑ','ㅒ','ㅓ','ㅔ','ㅕ','ㅖ','ㅗ','ㅘ','ㅙ','ㅚ','ㅛ','ㅜ','ㅝ','ㅞ','ㅟ','ㅠ','ㅡ','ㅢ','ㅣ'];
+  const JONG=['','ㄱ','ㄲ','ㄳ','ㄴ','ㄵ','ㄶ','ㄷ','ㄹ','ㄺ','ㄻ','ㄼ','ㄽ','ㄾ','ㄿ','ㅀ','ㅁ','ㅂ','ㅄ','ㅅ','ㅆ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+  let out=[];
+  for(const ch of s){
+    const code=ch.charCodeAt(0)-0xAC00;
+    if(code>=0 && code<11172){
+      out.push(CHO[Math.floor(code/588)]);
+      out.push(JUNG[Math.floor((code%588)/28)]);
+      const j=code%28; if(j) out.push(JONG[j]);
+    } else out.push(ch);
+  }
+  return out.join('');
+}
+function levStr(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;
+  const d=Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);
+  for(let j=1;j<=n;j++)d[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+  return d[m][n];}
+// 두 한글 단어가 발음상 거의 같은지 (끝소리 오인식만 인정, 앞부분 차이는 거부)
+function koClose(a,b){
+  if(!a||!b) return false;
+  if(a===b) return true;
+  // 짧은 단어(2글자 이하)는 자모가 적어 오탐 위험 → 근접 판정 안 함 (바다↔배, 얼↔열 차단)
+  if(a.length<=2 || b.length<=2) return false;
+  const da=decomposeKo(a), db=decomposeKo(b);
+  if(Math.abs(da.length-db.length)>1) return false; // 길이 차 크면 다른 말
+  const dist=levStr(da,db);
+  if(dist>1) return false;                            // 자모 2개 이상 차이는 다른 말
+  // 자모 1개 차이여도, 그 차이가 '앞쪽'이면 다른 단어(과학↔화학, 향상↔항상) → 거부
+  const keep=Math.floor(Math.min(da.length,db.length)*0.6);
+  if(keep>=1 && da.slice(0,keep)!==db.slice(0,keep)) return false;
+  return true;
+}
+
 /* 같은 영어 단어가 세트마다 뜻이 다르게 적힌 경우, 모든 뜻을 정답으로 인정 */
 const MEAN_DICT = {"rarely": ["거의 ~하지 않는", "거의 ~않는"], "benefit": ["이점, 이익", "이점", "이익을 얻다"], "wave": ["파도, 파동", "파도"], "movement": ["움직임", "(사회적) 운동"], "control": ["조절하다", "조종하다"], "loud": ["(소리가) 큰, 시끄러운", "크게; (소리가) 큰"], "face": ["직면하다", "(방향을) 향하다"], "increase": ["높이다, 증가시키다", "증가하다"], "experience": ["경험", "경험하다"], "support": ["지원하다", "지원; 지원하다", "지지, 성원"], "freeze": ["얼다, 얼리다", "얼다"], "produce": ["생산하다, 만들어 내다", "제작하다", "생성하다", "만들어 내다"], "annoying": ["성가신, 짜증 나는", "성가신"], "source": ["원천, 근원", "원천, 공급원"], "heat": ["데우다, 가열하다", "열"], "healthy": ["건강한", "건강한, 건강에 좋은"], "huge": ["거대한, 아주 큰", "거대한", "엄청난"], "at least": ["적어도, 최소한", "적어도"], "physical": ["신체의, 육체의", "신체적인"], "promote": ["승진시키다", "촉진하다"], "bring": ["데려오다, 가져오다", "가져오다, 가져가다"], "introduce": ["소개하다", "도입하다"], "chance": ["기회", "가능성, 기회"], "creature": ["동물, 생물", "생물"], "empty": ["빈", "비우다"], "normal": ["일반적인, 보통의", "정상적인", "일반적인"], "nearby": ["근처에서", "근처의"], "allow": ["허용하다, ~하게 하다", "~하게 하다"], "test": ["시험하다; 시험", "시험하다"], "hide": ["숨다, 숨기다", "숨기다 (hid-hidden)"], "survive": ["살아남다", "생존하다", "생존하다, 살아남다"], "prevent": ["막다", "방해하다, 막다"], "saying": ["속담, 격언", "속담"], "communicate": ["의사소통을 하다", "의사소통하다"], "researcher": ["연구자", "연구원"], "hope": ["희망", "바라다"], "certain": ["특정한; 확실한", "확신하는"], "embarrassed": ["당황한", "당황한, 부끄러운"], "match": ["시합, 경기", "연결하다, 일치시키다"], "give up": ["~을 포기하다", "포기하다"], "celebrate": ["축하하다", "축하하다, 기념하다"], "natural": ["자연의", "타고난; 자연스러운"], "recognize": ["알아차리다, 인식하다", "알아보다"], "consume": ["소비하다", "소비하다, 마시다"]};
 function allMeansFor(word){
@@ -518,7 +558,7 @@ function answerKeys(mean){
     if(stem.length>=1)keys.add(stem);});
   return [...keys];
 }
-function matchKo(mean,heardList,word){
+function matchKo(mean,heardList,word,spoken){
   // 이 단어가 여러 세트에서 가진 모든 뜻을 정답 키로 통합 (movement=움직임/운동 모두 인정)
   let keys=answerKeys(mean);
   const extra=allMeansFor(word);
@@ -536,12 +576,34 @@ function matchKo(mean,heardList,word){
     for(const k of keys){ if(h===k) return {ok:true,heard:raw}; }
     // 2) 등록된 유사어 그룹만 추가 인정 (활용형은 synMatch 내부 koStem이 흡수)
     for(const k of keys){ if(synMatch(h,k)) return {ok:true,heard:raw}; }
+    // 3) 음성 입력일 때만: 자모 1개 차이(끝소리 오인식 등)는 정답 인정 (움직임↔움직이)
+    if(spoken){
+      for(const k of keys){ if(koClose(h,k)) return {ok:true,heard:raw}; }
+      // 뒤에 딴말이 붙은 경우: 앞부분이 정답과 근접하면 인정 (움직이는것→움직임)
+      // 단, 파생 어미(~답게/~하게/~적으로 등)가 붙은 건 품사가 달라지므로 제외
+      const hasDeriv=/(답게|스럽게|롭게|하게|있게|적으로|적인|스러운|로운)/.test(h);
+      if(!hasDeriv){
+        for(const k of keys){
+          if(k.length>=2 && h.length>k.length){
+            const head=h.slice(0,k.length);
+            if(koClose(head,k)) return {ok:true,heard:raw};
+          }
+        }
+      }
+    }
   }
   return {ok:false,heard:heardList[0]||""};
 }
 
 /* ---- 예문 4지선다 퀴즈 ---- */
 let exquiz=null;
+// 시험 지시문 성격의 문장(예문이 아님)은 제외
+function isInstruction(w){
+  const ko=w.exKo||"", en=w.ex||"";
+  if(/고르시오|고르세요|물음에 답|알맞은 것을|가장 적절한 것을|밑줄 친|빈칸에 들어갈/.test(ko)) return true;
+  if(/^Choose |^Read the|^What is the (best )?(title|main)|for the passage/i.test(en)) return true;
+  return false;
+}
 function blankExample(word, ex){
   if(!ex) return null;
   const w=(word||"").trim();
@@ -560,7 +622,9 @@ function blankExample(word, ex){
 }
 function startExQuiz(kind){
   const s=SETS[state.setIdx];
-  let pool=s.words.map(w=>({w, blank: blankExample(w.w, w.ex)}));
+  // 지시문 성격 문장은 예문 시험에서 제외
+  const valid=s.words.filter(w=>!isInstruction(w));
+  let pool=valid.map(w=>({w, blank: blankExample(w.w, w.ex)}));
   if(kind==="exword") pool=pool.filter(x=>x.blank);
   else pool=pool.filter(x=>x.w.ex && x.w.exKo);
   pool=shuffle(pool);
@@ -568,16 +632,18 @@ function startExQuiz(kind){
     let prompt, answer, options;
     if(kind==="exword"){
       prompt=x.blank; answer=x.w.w;
-      const wrongs=shuffle(s.words.filter(o=>o.w!==x.w.w)).slice(0,3).map(o=>o.w);
+      const wrongs=shuffle(valid.filter(o=>o.w!==x.w.w)).slice(0,3).map(o=>o.w);
       options=shuffle([answer,...wrongs]);
     }else{
       prompt=x.w.ex; answer=x.w.exKo;
-      const wrongs=shuffle(s.words.filter(o=>o.exKo && o.exKo!==x.w.exKo)).slice(0,3).map(o=>o.exKo);
+      // 오답 해석도 지시문이 아닌 실제 예문 해석에서만 뽑기 + 중복 방지
+      const others=[...new Set(valid.filter(o=>o.exKo && o.exKo!==x.w.exKo).map(o=>o.exKo))];
+      const wrongs=shuffle(others).slice(0,3);
       options=shuffle([answer,...wrongs]);
     }
     return {word:x.w, prompt, answer, options};
   });
-  exquiz={kind, qs, i:0, picked:null, score:0, results:[], done:false, saved:false};
+  exquiz={kind, qs, i:0, picked:null, score:0, results:[], done:false, saved:false, showHint:false};
 }
 function exQuizHTML(){
   const s=SETS[state.setIdx];
@@ -618,7 +684,11 @@ function exQuizHTML(){
     }
     return `<button class="${cls}" data-exopt="${esc(o)}" ${exquiz.picked!==null?'disabled':''}>${esc(o)}</button>`;
   }).join("");
-  const hint = kind==="exword" ? `<div class="exhint">뜻 힌트: <b>${esc(q.word.mean)}</b></div>` : "";
+  const hint = kind==="exword"
+    ? (exquiz.showHint
+        ? `<div class="exhint">뜻 힌트: <b>${esc(q.word.mean)}</b></div>`
+        : `<button class="hintbtn" data-exhint>💡 힌트 보기</button>`)
+    : "";
   return `
     <header><button class="backbtn" data-modes>‹ 뒤로</button>
       <h1>${esc(s.pages)} · ${modeName}</h1>
@@ -973,7 +1043,7 @@ function submitTyping(){
   if(!val){ el.focus(); return; }
   const q=test.qs[test.i];
   const isKo=test.mode==="ko";
-  const m = isKo ? matchKo(q.mean, [val], q.w) : matchEn(q.w, [val], true);
+  const m = isKo ? matchKo(q.mean, [val], q.w, false) : matchEn(q.w, [val], true);
   test.heard=val; test.ok=m.ok; test.phase="result";
   render();
   if(m.ok) speak(q.w, null, "en");
@@ -998,7 +1068,7 @@ function recordOnce(){
     got=true;
     const alts=[];
     for(let i=0;i<e.results[0].length;i++)alts.push(e.results[0][i].transcript);
-    const m = isKo ? matchKo(q.mean, alts, q.w) : matchEn(q.w, alts);
+    const m = isKo ? matchKo(q.mean, alts, q.w, true) : matchEn(q.w, alts);
     test.heard=alts[0]; test.ok=m.ok; test.phase="result";
     recording=false; render();
     if(m.ok) speak(q.w, null, "en"); // 정답이면 영어 발음 들려주기
@@ -1021,7 +1091,7 @@ function recordOnce(){
 function bind(){
   const app=document.getElementById("app");
   app.onclick=(e)=>{
-    const t=e.target.closest("[data-set],[data-home],[data-modes],[data-go],[data-test],[data-exquiz],[data-exopt],[data-exnext],[data-exretry],[data-w],[data-speak],[data-mic],[data-submit],[data-next],[data-skip],[data-skip2],[data-retry],[data-retrywrong],[data-fav],[data-studyall],[data-studyfav],[data-share],[data-history],[data-setname]");
+    const t=e.target.closest("[data-set],[data-home],[data-modes],[data-go],[data-test],[data-exquiz],[data-exopt],[data-exnext],[data-exretry],[data-exhint],[data-w],[data-speak],[data-mic],[data-submit],[data-next],[data-skip],[data-skip2],[data-retry],[data-retrywrong],[data-fav],[data-studyall],[data-studyfav],[data-share],[data-history],[data-setname]");
     if(!t)return;
     if(t.hasAttribute("data-speak")){ e.stopPropagation(); speak(t.getAttribute("data-speak"), t, t.getAttribute("data-lang")||"en"); return; }
     if(t.hasAttribute("data-exquiz")){ startExQuiz(t.getAttribute("data-exquiz")); state.view="exquiz"; scrollTo(0,0); render(); return; }
@@ -1030,11 +1100,14 @@ function bind(){
       const pick=t.getAttribute("data-exopt"); const q=exquiz.qs[exquiz.i];
       exquiz.picked=pick; const ok=(pick===q.answer); if(ok)exquiz.score++;
       exquiz.results[exquiz.i]={word:q.word, ok};
-      render(); if(ok) speak(q.word.w,null,"en"); return;
+      render();
+      // 정답 여부와 상관없이 예문 전체를 읽어줌 (학습 강화)
+      speak(q.word.ex, null, "en"); return;
     }
+    if(t.hasAttribute("data-exhint")){ exquiz.showHint=true; render(); return; }
     if(t.hasAttribute("data-exnext")){
       if(exquiz.i+1>=exquiz.qs.length){ exquiz.done=true; }
-      else { exquiz.i++; exquiz.picked=null; }
+      else { exquiz.i++; exquiz.picked=null; exquiz.showHint=false; }
       scrollTo(0,0); render(); return;
     }
     if(t.hasAttribute("data-exretry")){ startExQuiz(exquiz.kind); scrollTo(0,0); render(); return; }
